@@ -13,7 +13,7 @@ else:
 ext_modules = [
     Pybind11Extension(
         "lorenz_cpp",                  # The name of the module you will import in Python
-        [r"dop853cpp\lorenz.cpp"],         # The C++ source file
+        [r"dop853cpp/lorenz.cpp"],         # The C++ source file
         cxx_std=17,
         extra_compile_args=compiler_args,
     ),

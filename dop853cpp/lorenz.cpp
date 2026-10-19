@@ -37,6 +37,9 @@ struct TrajectoryTracker {
     std::vector<double> x;
     std::vector<double> y;
     std::vector<double> z;
+    std::vector<double> dx;
+    std::vector<double> dy;
+    std::vector<double> dz;
 };
 
 // Informações da Integração
@@ -166,6 +169,10 @@ bool dop853_step(
             r_next.x += h * DOP853Const::B[i] * k[i].x;
             r_next.y += h * DOP853Const::B[i] * k[i].y;
             r_next.z += h * DOP853Const::B[i] * k[i].z;
+
+            error.x += h * DOP853Const::ER[i] * k[i].x;
+            error.y += h * DOP853Const::ER[i] * k[i].y;
+            error.z += h * DOP853Const::ER[i] * k[i].z;
         }
 
         // Adaptive step size control
@@ -225,17 +232,17 @@ double cubicSplineDerivative(
 // Interpola o tempo e o estado do Evento entre dois passos
 template <int VARNUM>
 void interpolateCrossing(
-    double tNew, State3D rNew, // Estado após o passo
-    double tOld, State3D rOld,  // Estado antes do passo
+    double tNew, State3D rNew, State3D drNew, // Estado após o passo
+    double tOld, State3D rOld, State3D drOld, // Estado antes do passo
     double hTaken, // Tamanho do passo
     double timeOffSet, // Offset do sub-intervalo atual
     double crossVal, // Valor de busca do evento
     const SystemParams& params, 
     CrossTracker& tracker){
         // r' para a interpolção de r
-        State3D drOld, drNew;
-        lorenzODE(tOld, rOld, drOld, params);
-        lorenzODE(tNew, rNew, drNew, params);
+        // State3D drOld, drNew;
+        // lorenzODE(tOld, rOld, drOld, params);
+        // lorenzODE(tNew, rNew, drNew, params);
 
         // r'' para a interpolção de r'
         State3D dr2Old, dr2New;
@@ -280,7 +287,7 @@ void interpolateCrossing(
         double s = (crossVal - xInterpOld) / (xInterpNew - xInterpOld);
 
         // Newton-Raphson Iteration to determine 's'
-        for (int iter = 0; iter < 15; ++iter) {
+        for (int iter = 0; iter < 25; ++iter) {
 
             // Evaluate the Cubic dx Spline
             double dx_Spline = cubicSpline(s, hTaken, xInterpOld, dxInterpOld, xInterpNew, dxInterpNew);
@@ -289,14 +296,14 @@ void interpolateCrossing(
             double dx_ds_Spline = cubicSplineDerivative(s, hTaken, xInterpOld, dxInterpOld, xInterpNew, dxInterpNew);
 
             // Break if it hits a flat slope to prevent division by zero
-            if (fabs(dx_ds_Spline) < 1e-12) break;
+            if (fabs(dx_ds_Spline) < 1e-15) break;
 
             // Newton-Raphson update
-            double ds = dx_Spline / dx_ds_Spline;
+            double ds = (dx_Spline - crossVal) / dx_ds_Spline;
             s -= ds;
 
             // Break if converged
-            if (fabs(ds) < 1e-12) break;
+            if (fabs(ds) < 1e-14) break;
         }
 
         // Clamp 's' strictly between 0 and 1 to guarantee it stays inside the step
@@ -343,10 +350,15 @@ void integrate_dop853(
     TrajectoryTracker& trajectory, // Tracker of validated steps
     Status& integrationStatus){ 
         // Record the initial state using the GLOBAL initial time
+        State3D drIni;
+        lorenzODE(t, r, drIni, params);
         trajectory.t.push_back(breakpoints[0]);
         trajectory.x.push_back(r.x);
         trajectory.y.push_back(r.y);
         trajectory.z.push_back(r.z);
+        trajectory.dx.push_back(drIni.x);
+        trajectory.dy.push_back(drIni.y);
+        trajectory.dz.push_back(drIni.z);
 
         // Perform the integration along each sub-interval
         for (int b = 1; b < num_breakpoints; ++b) {
@@ -364,10 +376,8 @@ void integrate_dop853(
                 // State before next step
                 double tOld = t;
                 State3D rOld = r;
-                State3D drOld, drNew;
-                
+                State3D drOld;
                 lorenzODE(tOld, rOld, drOld, params);
-                lorenzODE(t, r, drNew, params);
 
                 // Size of the next step
                 double h_taken = h;
@@ -377,52 +387,59 @@ void integrate_dop853(
                     integrationStatus.nAccepted++;
                     // Determine the offset for this specific sub-interval
                     double current_offset = breakpoints[b-1];
+                    State3D drNew;
+                    lorenzODE(t, r, drNew, params);
                     // Verify if the step crosses the startTime of the trackers
                     if (t + current_offset >= crossTracker.start_time) { 
                         // Verify if r or r' crossed the target plane
                         if constexpr (VARNUM == 1) { // Look for crosses in the x variable
                             if constexpr (DIR == -1) {
-                                if (rOld.x > crossVal && r.x <= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (rOld.x > crossVal && r.x <= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             } else if constexpr (DIR == 1){
-                                if (rOld.x < crossVal && r.x >= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (rOld.x < crossVal && r.x >= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             }
                         } else if constexpr (VARNUM == 2) { // Look for crosses in the y variable
                             if constexpr (DIR == -1) {
-                                if (rOld.y > crossVal && r.y <= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (rOld.y > crossVal && r.y <= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             } else if constexpr (DIR == 1){
-                                if (rOld.y < crossVal && r.y >= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (rOld.y < crossVal && r.y >= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             }
                         } else if constexpr (VARNUM == 3) { // Look for crosses in the z variable
                             if constexpr (DIR == -1) {
-                                if (rOld.z > crossVal && r.z <= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (rOld.z > crossVal && r.z <= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             } else if constexpr (DIR == 1){
-                                if (rOld.z < crossVal && r.z >= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (rOld.z < crossVal && r.z >= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             }
                         } else if constexpr (VARNUM == -1) { // Look for crosses in the x' variable
                             if constexpr (DIR == -1) {
-                                if (drOld.x > crossVal && drNew.x <= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (drOld.x > crossVal && drNew.x <= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             } else if constexpr (DIR == 1){
-                                if (drOld.x < crossVal && drNew.x >= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (drOld.x < crossVal && drNew.x >= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             }
                         } else if constexpr (VARNUM == -2) { // Look for crosses in the y' variable
                             if constexpr (DIR == -1) {
-                                if (drOld.y > crossVal && drNew.y <= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (drOld.y > crossVal && drNew.y <= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             } else if constexpr (DIR == 1){
-                                if (drOld.y < crossVal && drNew.y >= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (drOld.y < crossVal && drNew.y >= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             }
                         } else if constexpr (VARNUM == -3) { // Look for crosses in the z' variable
                             if constexpr (DIR == -1) {
-                                if (drOld.z > crossVal && drNew.z <= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (drOld.z > crossVal && drNew.z <= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             } else if constexpr (DIR == 1){
-                                if (drOld.z < crossVal && drNew.z >= crossVal) interpolateCrossing<VARNUM>(t, r, tOld, rOld, h_taken, current_offset, crossVal, params, crossTracker);
+                                if (drOld.z < crossVal && drNew.z >= crossVal) interpolateCrossing<VARNUM>(t, r, drNew, tOld, rOld, drOld, h_taken, current_offset, crossVal, params, crossTracker);
                             }
                         }
                     }
+
                     // Add the accepted step to the tracker
                     trajectory.t.push_back(t + current_offset);
                     trajectory.x.push_back(r.x);
                     trajectory.y.push_back(r.y);
                     trajectory.z.push_back(r.z);
+                    trajectory.dx.push_back(drNew.x);
+                    trajectory.dy.push_back(drNew.y);
+                    trajectory.dz.push_back(drNew.z);
+
                     // Interrupt the integration if all desired crosses were found
                     if (crossTracker.total_cross == crossTracker.max_cross) return;
                 }
@@ -436,7 +453,7 @@ void integrate_dop853(
 namespace py = pybind11;
 
 template <typename T>
-// Helper function to convert std::vector<T> to py::array_t<T>, allowing to return NumPy arrays directly from C++ without copying the data.
+// Helper function to convert std::vector<T> to py::array_t<T>, allowing to return NumPy arrays directly from C++ without copying the data
 py::array_t<T> as_pyarray(std::vector<T>&& vec) {
     // Move the vector to the heap so it survives after the function returns
     auto* ptr = new std::vector<T>(std::move(vec));
@@ -452,6 +469,7 @@ py::array_t<T> as_pyarray(std::vector<T>&& vec) {
 
 // Wrapper function Python will actually call
 std::tuple<py::array_t<double>, py::array_t<double>, py::array_t<double>, py::array_t<double>, 
+           py::array_t<double>, py::array_t<double>, py::array_t<double>,
            py::array_t<double>, py::array_t<double>, py::array_t<double>, py::array_t<double>, 
            std::tuple<int, int, int, int, double>>
 run_simulation(std::vector<double> r0,
@@ -540,6 +558,9 @@ run_simulation(std::vector<double> r0,
         as_pyarray(std::move(trajectory.x)),
         as_pyarray(std::move(trajectory.y)),
         as_pyarray(std::move(trajectory.z)),
+        as_pyarray(std::move(trajectory.dx)),
+        as_pyarray(std::move(trajectory.dy)),
+        as_pyarray(std::move(trajectory.dz)),
         as_pyarray(std::move(py_cross_times)),
         as_pyarray(std::move(py_cross_x)),
         as_pyarray(std::move(py_cross_y)),
@@ -557,5 +578,5 @@ PYBIND11_MODULE(lorenz_cpp, m) {
           py::arg("sigma"), py::arg("beta"), py::arg("rho"),
           py::arg("varNum"), py::arg("dir"), py::arg("crossVal"),
           py::arg("max_cross") = 100, py::arg("trackerStartTime") = 0.0,
-          py::arg("rtol") = 1e-7, py::arg("atol") = 1e-10, py::arg("initialStep") = 1e-4);
+          py::arg("rtol") = 1e-7, py::arg("atol") = 1e-10, py::arg("initialStep") = 1e-6);
 }
