@@ -37,7 +37,7 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
 
     **Parâmetros:**
     * `r0` (array_like): Estado inicial r(t0).
-    * `tTransiente` (float): Duração do Transiente a ser ignorado.
+    * `tTransiente` (float): Duração do Transiente a ser ignorado. Se menor ou igual a 0 não há transiente
     * `tSpan (float)`: Duração máxima da Integracão.
     * `varNum` (int or str): Define o tipo de evento a ser verificado. 0 para não buscar nenhum evento.
     * `dir` (int): Direção da verificação dos eventos (1 ou -1).
@@ -70,11 +70,22 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
             raise Exception("Int varNum de Evento Inválido.")
     else:
         raise Exception("Evento varNum Inválido")
+
+    if tTransiente <= 0:
+        if isinstance(tSpan, (list, tuple)):
+            bp = [tSpan[0], tSpan[-1]]
+        else:
+            bp = [0, tSpan]
+    else:
+        if isinstance(tSpan, (list, tuple)):
+            bp = [-tTransiente, 0, tSpan[-1]]
+        else:
+            bp = [-tTransiente, 0, tSpan]
     
     # t, x, y, z, dx, dy, dz, tEv, xEv, yEv, zEv, status
-    result = lorenz_cpp.run_simulation(r0=r0, breakpoints=[-tTransiente, 0, tSpan],
-                                        sigma=sigma, beta=beta, rho=rho, varNum=varNum, dir=dir, crossVal=crossVal,
-                                        max_cross=maxCross, trackerStartTime=tTransiente, rtol=rtol, atol=atol)
+    result = lorenz_cpp.run_simulation(r0=r0, breakpoints=bp,sigma=sigma, beta=beta, rho=rho, 
+                                       varNum=varNum, dir=dir, crossVal=crossVal,max_cross=maxCross, 
+                                       trackerStartTime=tTransiente, rtol=rtol, atol=atol)
     # Passos de Integração
     t = result[0]
     r = np.vstack(result[1:4]) # np.vstack((x,y,z)) # x, y, z = result[1:4]
