@@ -1,5 +1,5 @@
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h> // Automatically converts std::vector to Python lists
+#include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <vector>
 #include <cmath>
@@ -112,23 +112,23 @@ namespace DOP853Const {
     };
 }
 
-// Sistema de Lorenz r'
+// Sistema de Lorenz (r')
 inline void lorenzODE(
     double t, 
-    const State3D& r, // State r(t) 
-    State3D& drdt, // State r'(t) a ser determinado
+    const State3D& r, // Estado r(t) 
+    State3D& drdt, // Estado r'(t) a ser determinado
     const SystemParams& params) {
         drdt.x = params.sigma * (r.y - r.x);
         drdt.y = r.x * (params.rho - r.z) - r.y;
         drdt.z = r.x * r.y - params.beta * r.z;
     }
 
-// Derivadas do sistema r''
+// Derivadas do sistema (r'')
 inline void lorenzODE_dt2(
     double t, 
-    const State3D& r, // State r(t)
-    const State3D& drdt, // State r'(t)
-    State3D& dr2dt2, // State r''(t) a ser determinado
+    const State3D& r, // Estado r(t)
+    const State3D& drdt, // Estado r'(t)
+    State3D& dr2dt2, // Estado r''(t) a ser determinado
     const SystemParams& params) {
         dr2dt2.x = params.sigma * (drdt.y - drdt.x);
         dr2dt2.y = drdt.x * (params.rho - r.z) - r.x * drdt.z - drdt.y;
@@ -138,16 +138,16 @@ inline void lorenzODE_dt2(
 // Core Step Function
 bool dop853_step(
     double& t, State3D& r, 
-    double& h, // Time step
-    double rtol, double atol, // Error tolerances
+    double& h, // Passo de tempo
+    double rtol, double atol, // Tolerâncias
     const SystemParams& params) {
-        State3D k[DOP853Const::STAGES]; // Array with STAGES (12 for DOP853) states to perform step
-        State3D r_temp; // Auxiliar state
+        State3D k[DOP853Const::STAGES]; // Array com os 12 Estágios para o passo de integração
+        State3D r_temp; // Estado Auxiliar
 
-        // Stage 1
+        // Estágio 1
         lorenzODE(t, r, k[0], params);
 
-        // Stage 2 to 12
+        // Estágios 2 ao 12
         for (int i = 1; i < DOP853Const::STAGES; ++i) {
             r_temp.x = r.x;
             r_temp.y = r.y;
@@ -161,21 +161,22 @@ bool dop853_step(
             lorenzODE(t + h * DOP853Const::C[i], r_temp, k[i], params);
         }
 
-        // Combine stages for candidate solution and error estimation
         State3D r_next = r;
         State3D error = {0.0, 0.0, 0.0};
 
         for (int i = 0; i < DOP853Const::STAGES; ++i) {
+            // Combina os Estágios para estimar a solução após o passo
             r_next.x += h * DOP853Const::B[i] * k[i].x;
             r_next.y += h * DOP853Const::B[i] * k[i].y;
             r_next.z += h * DOP853Const::B[i] * k[i].z;
 
+            // Estima o erro após o passo
             error.x += h * DOP853Const::ER[i] * k[i].x;
             error.y += h * DOP853Const::ER[i] * k[i].y;
             error.z += h * DOP853Const::ER[i] * k[i].z;
         }
 
-        // Adaptive step size control
+        // Controle adaptativo do próximo passo
         double scale_x = atol + rtol * fmax(fabs(r.x), fabs(r_next.x));
         double scale_y = atol + rtol * fmax(fabs(r.y), fabs(r_next.y));
         double scale_z = atol + rtol * fmax(fabs(r.z), fabs(r_next.z));
@@ -184,21 +185,21 @@ bool dop853_step(
         double err_y = fabs(error.y) / scale_y;
         double err_z = fabs(error.z) / scale_z;
 
-        // RMS error across the 3 dimensions
+        // Norma do erro
         double max_err = sqrt((1.0/3.0) * (err_x * err_x + err_y * err_y + err_z * err_z));
 
         if (max_err <= 1.0) {
-            // Accept Step
-            t += h; // Update the current time
-            r = r_next; // Update the state
+            // Aceita o Passo
+            t += h; // Atualiza o tempo atual
+            r = r_next; // Atualiza o estado
         }
 
-        // Compute next step size
+        // Determina o próximo passo
         double factor = 0.9 * pow(1.0 / fmax(max_err, 1e-10), 1.0/8.0);
         factor = fmin(5.0, fmax(0.1, factor)); // Clamp factor
         h *= factor; // Update next step
         
-        // Returns if the step was accepted (true) or rejected (false)
+        // Retorna se o passo foi aceito (true) ou rejeitado (false)
         return (max_err <= 1.0);
 }
 
@@ -239,11 +240,6 @@ void interpolateCrossing(
     double crossVal, // Valor de busca do evento
     const SystemParams& params, 
     CrossTracker& tracker){
-        // r' para a interpolção de r
-        // State3D drOld, drNew;
-        // lorenzODE(tOld, rOld, drOld, params);
-        // lorenzODE(tNew, rNew, drNew, params);
-
         // r'' para a interpolção de r'
         State3D dr2Old, dr2New;
         lorenzODE_dt2(tOld, rOld, drOld, dr2Old, params);
@@ -283,57 +279,54 @@ void interpolateCrossing(
             dxInterpNew = dr2New.z;
         }
 
-        // Initial guess for the root fraction 's' (Linear Interpolation)
+        // Palpite inicial para 's' (Interpolação Linear)
         double s = (crossVal - xInterpOld) / (xInterpNew - xInterpOld);
 
-        // Newton-Raphson Iteration to determine 's'
+        // Iteração Newton-Raphson para determinar 's'
         for (int iter = 0; iter < 25; ++iter) {
 
-            // Evaluate the Cubic dx Spline
+            // Cubic Spline em dx
             double dx_Spline = cubicSpline(s, hTaken, xInterpOld, dxInterpOld, xInterpNew, dxInterpNew);
 
-            // Evaluate the Derivative v'(s) = dv/ds
+            // Cubic Spline da derivada dx/ds
             double dx_ds_Spline = cubicSplineDerivative(s, hTaken, xInterpOld, dxInterpOld, xInterpNew, dxInterpNew);
 
-            // Break if it hits a flat slope to prevent division by zero
+            // Evita divisões por 0
             if (fabs(dx_ds_Spline) < 1e-15) break;
 
             // Newton-Raphson update
             double ds = (dx_Spline - crossVal) / dx_ds_Spline;
             s -= ds;
 
-            // Break if converged
+            // Interrmpe se tiver convergido
             if (fabs(ds) < 1e-14) break;
         }
 
-        // Clamp 's' strictly between 0 and 1 to guarantee it stays inside the step
+        // Limita 's' entre 0 e 1 para manter dentro do passo
         s = fmax(0.0, fmin(1.0, s));
 
-        // Interpolate tCross with the refined 's'
+        // Interpola o tempo do evento com o 's' refinado
         double tCross = tOld + hTaken * s + timeOffSet; // In GLOBAL time
 
-        // Check if the crossing should be tracked
+        // Verifica se o evento deve ser salvo
         if (tCross >= tracker.start_time) {
-            // Interpolate rCross using the Cubic Position Spline
+            // Interpola rCross com o CubicSpline
             double xCross = cubicSpline(s, hTaken, rOld.x, drOld.x, rNew.x, drNew.x);
             double yCross = cubicSpline(s, hTaken, rOld.y, drOld.y, rNew.y, drNew.y);
             double zCross = cubicSpline(s, hTaken, rOld.z, drOld.z, rNew.z, drNew.z);
-            // State3D rCross = {xCross, yCross, zCross};
-            // If the number of crossings is unbound
+            // Se todos os eventos devem ser salvos
             if (tracker.max_cross < 0) {
                 tracker.cross_times -> push_back(tCross);
                 tracker.cross_x -> push_back(xCross);
                 tracker.cross_y -> push_back(yCross);
                 tracker.cross_z -> push_back(zCross);
-                // tracker.cross_positions -> push_back(rCross);
             } else { 
-                // If only max_cross should be tracked
+                // Se apenas max_cross eventos devem ser salvos
                 int index = tracker.total_cross % tracker.max_cross;
                 (*tracker.cross_times)[index] = tCross;
                 (*tracker.cross_x)[index] = xCross;
                 (*tracker.cross_y)[index] = yCross;
                 (*tracker.cross_z)[index] = zCross;
-                // (*tracker.cross_positions)[index] = rCross;
             }
             tracker.total_cross++;
         }
@@ -350,15 +343,15 @@ void integrate_dop853(
     TrajectoryTracker& trajectory, // Tracker of validated steps
     Status& integrationStatus){ 
         // Record the initial state using the GLOBAL initial time
-        State3D drIni;
-        lorenzODE(t, r, drIni, params);
-        trajectory.t.push_back(breakpoints[0]);
-        trajectory.x.push_back(r.x);
-        trajectory.y.push_back(r.y);
-        trajectory.z.push_back(r.z);
-        trajectory.dx.push_back(drIni.x);
-        trajectory.dy.push_back(drIni.y);
-        trajectory.dz.push_back(drIni.z);
+        // State3D drIni;
+        // lorenzODE(t, r, drIni, params);
+        // trajectory.t.push_back(breakpoints[0]);
+        // trajectory.x.push_back(r.x);
+        // trajectory.y.push_back(r.y);
+        // trajectory.z.push_back(r.z);
+        // trajectory.dx.push_back(drIni.x);
+        // trajectory.dy.push_back(drIni.y);
+        // trajectory.dz.push_back(drIni.z);
 
         // Perform the integration along each sub-interval
         for (int b = 1; b < num_breakpoints; ++b) {
@@ -430,18 +423,19 @@ void integrate_dop853(
                             }
                         }
                     }
-
-                    // Add the accepted step to the tracker
-                    trajectory.t.push_back(t + current_offset);
-                    trajectory.x.push_back(r.x);
-                    trajectory.y.push_back(r.y);
-                    trajectory.z.push_back(r.z);
-                    trajectory.dx.push_back(drNew.x);
-                    trajectory.dy.push_back(drNew.y);
-                    trajectory.dz.push_back(drNew.z);
+                    if (t + current_offset >= 0) {
+                        // Add the accepted step to the tracker
+                        trajectory.t.push_back(t + current_offset);
+                        trajectory.x.push_back(r.x);
+                        trajectory.y.push_back(r.y);
+                        trajectory.z.push_back(r.z);
+                        trajectory.dx.push_back(drNew.x);
+                        trajectory.dy.push_back(drNew.y);
+                        trajectory.dz.push_back(drNew.z);
+                    }
 
                     // Interrupt the integration if all desired crosses were found
-                    if (crossTracker.total_cross == crossTracker.max_cross) return;
+                    if (crossTracker.max_cross > 0 && crossTracker.total_cross == crossTracker.max_cross) return;
                 }
                 else integrationStatus.nRejected++;
             }
@@ -481,10 +475,11 @@ run_simulation(std::vector<double> r0,
 {
     // Setup the inital state
     State3D r = {r0.at(0), r0.at(1), r0.at(2)};
+
     // Start local integration time at 0
     double t = 0.0;
-    // Sets the initial system parameters
 
+    // Sets the initial system parameters
     SystemParams params = {sigma, beta, rho};
 
     double totalIntegrationTime = breakpoints.back() - breakpoints.front();
@@ -494,6 +489,7 @@ run_simulation(std::vector<double> r0,
 
     // Creates the steps tracker
     TrajectoryTracker trajectory;
+
     // Pre-allocate memory to minimize dynamic reallocation 
     trajectory.t.reserve(estimatedSteps); 
     trajectory.x.reserve(estimatedSteps); 
@@ -539,6 +535,8 @@ run_simulation(std::vector<double> r0,
     } else if (varNum == -3) {
         if (dir == 1) integrate_dop853<-3, 1>(r, t, bp_ptr, num_bp, rtol, atol, initialStep, params, trackerCrossings, crossVal, trajectory, integrationStatus);
         else if (dir == -1) integrate_dop853<-3, -1>(r, t, bp_ptr, num_bp, rtol, atol, initialStep, params, trackerCrossings, crossVal, trajectory, integrationStatus);
+    } else {
+        integrate_dop853<0, 1>(r, t, bp_ptr, num_bp, rtol, atol, initialStep, params, trackerCrossings, crossVal, trajectory, integrationStatus);
     }
 
     // Re-acquire the Python GIL after performing the integration and before before using the Python C-API
