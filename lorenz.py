@@ -103,7 +103,7 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
         sol['y'] = r
     if dense_output: # Salva o interpolador da Integração
         dr = np.vstack(result[4:7]) # np.vstack((dx,dy,dz)) # dx, dy, dz = result[4:7]
-        spline = CubicHermiteSpline(t, r, dr)
+        spline = CubicHermiteSpline(t, r, dr, axis=1)
         sol['sol'] = spline
     sol['status'] = result[-1]
     return sol
