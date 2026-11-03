@@ -31,9 +31,9 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
     * **Corte do Plano em x:** varNum = "x" or 1
     * **Corte do Plano em y:** varNum = "y" or 2
     * **Corte do Plano em z:** varNum = "z" or 3
-    * **Corte do Plano em x':** varNum = "x'" or "x`" or -1
-    * **Corte do Plano em y':** varNum = "y'" or "y`" or -2
-    * **Corte do Plano em z':** varNum = "z'" or "z`" or -3
+    * **Corte do Plano em x':** varNum = "x'" or "x`" or "x." or -1
+    * **Corte do Plano em y':** varNum = "y'" or "y`" or "y." or -2
+    * **Corte do Plano em z':** varNum = "z'" or "z`" or "z." or -3
 
     **Parâmetros:**
     * `r0` (array_like): Estado inicial r(t0).
@@ -56,7 +56,7 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
     
     # Verificação do evento a ser identificado
     if isinstance(varNum, str):
-        fator = -1 if ("'" in varNum) or ("`" in varNum) else 1
+        fator = -1 if ("'" in varNum) or ("`" in varNum) or ("." in varNum) else 1
         if 'x' in varNum.lower():
             varNum = fator * 1
         elif 'y' in varNum.lower():
