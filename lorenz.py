@@ -23,7 +23,7 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
                     varNum, dir, crossVal,
                     sigma=10., beta=8./3., rho=28.,
                     maxCross=100, rtol=1e-7, atol=1e-10,
-                    dense_output=True, trajectory=False):
+                    dense_output=False, trajectory=True):
     '''
     Integra o sistema de Lorenz com o integrador em C++ com a detecção de Eventos.
 
@@ -34,6 +34,7 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
     * **Corte do Plano em x':** varNum = "x'" or "x`" or "x." or -1
     * **Corte do Plano em y':** varNum = "y'" or "y`" or "y." or -2
     * **Corte do Plano em z':** varNum = "z'" or "z`" or "z." or -3
+    * **Sem Evento:** varNum = 0 or "" or None
 
     **Parâmetros:**
     * `r0` (array_like): Estado inicial r(t0).
@@ -55,7 +56,10 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
     '''
     
     # Verificação do evento a ser identificado
-    if isinstance(varNum, str):
+    if varNum is None:
+        varNum = 0
+
+    elif isinstance(varNum, str):
         fator = -1 if ("'" in varNum) or ("`" in varNum) or ("." in varNum) else 1
         if 'x' in varNum.lower():
             varNum = fator * 1
@@ -63,6 +67,8 @@ def simulaLorenzCPP(r0, tTransiente, tSpan,
             varNum = fator * 2
         elif 'z' in varNum.lower():
             varNum = fator * 3
+        elif varNum == "":
+            varNum = 0
         else:
             raise Exception("String varNum de Evento Inválida.")
     elif isinstance(varNum, int):
